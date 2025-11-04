@@ -159,8 +159,10 @@
         <div class="model">
           <span class="muted">Model</span>
           <input id="model" type="text" placeholder="llama3" value="llama3"/>
+          <button id="models_btn" class="btn" type="button" title="Load available models">Models</button>
           <button id="clear">New chat</button>
         </div>
+        <div id="models_menu" class="menu" style="display:none; position:absolute; right:1rem; top:3.4rem; z-index:20"></div>
       </header>
 
       <main class="container">
@@ -193,6 +195,9 @@
                 <label class="muted">Server timeout (sec)
                   <input id="timeout_sec" type="number" min="5" placeholder="optional" style="width:100%;padding:.4rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;color:var(--text)" />
                 </label>
+                <label class="muted">Stream responses
+                  <input id="stream_toggle" type="checkbox" />
+                </label>
               </div>
             </details>
           </div>
@@ -218,7 +223,6 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/json/json.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 
     <script>
       const $ = (s) => document.querySelector(s);
@@ -236,6 +240,9 @@
       const tempEl = $('#temperature');
       const maxTokEl = $('#max_tokens');
       const timeoutEl = $('#timeout_sec');
+      const streamEl = $('#stream_toggle');
+      const modelsBtn = $('#models_btn');
+      const modelsMenu = $('#models_menu');
       const copyBtn = $('#copyCode');
       const closeBtn = $('#closeEditor');
       const gridEl = document.querySelector('.contentGrid');
@@ -245,16 +252,21 @@
       function editorTheme() { return (document.body.getAttribute('data-theme') === 'light') ? 'eclipse' : 'material'; }
       function setEditorModeByLang(lang) {
         if (!cm) return;
+        const l = (lang || '').toLowerCase();
+        if (l === 'json') {
+          cm.setOption('mode', { name: 'javascript', json: true });
+          return;
+        }
         const map = {
           js: 'javascript', javascript: 'javascript', ts: 'javascript', typescript: 'javascript',
           py: 'python', python: 'python',
           sh: 'shell', bash: 'shell', shell: 'shell',
           md: 'markdown', markdown: 'markdown',
           html: 'htmlmixed', xml: 'xml',
-          json: 'application/json', yaml: 'yaml', yml: 'yaml', css: 'css',
+          yaml: 'yaml', yml: 'yaml', css: 'css',
           java: 'text/x-java', c: 'text/x-csrc', cpp: 'text/x-c++src'
         };
-        const mode = map[lang?.toLowerCase?.()] || 'javascript';
+        const mode = map[l] || 'javascript';
         cm.setOption('mode', mode);
       }
       function initEditor() {
@@ -322,7 +334,8 @@
         temperature: localStorage.getItem('temperature') || '',
         max_tokens: localStorage.getItem('max_tokens') || '',
         timeout_sec: localStorage.getItem('timeout_sec') || '',
-        model: localStorage.getItem('model') || 'llama3',
+        model: localStorage.getItem('model') || '',
+        stream: localStorage.getItem('stream') === '1' ? true : false,
         messages: JSON.parse(localStorage.getItem('messages') || '[]')
       };
       function setAgent(key) {
@@ -338,11 +351,20 @@
       tempEl.value = state.temperature;
       maxTokEl.value = state.max_tokens;
       if (timeoutEl) timeoutEl.value = state.timeout_sec;
+      if (streamEl) streamEl.checked = !!state.stream;
 
       function updatePlaceholders() {
         const p = providerEl.value;
-        if (p === 'gpt4all') apiBaseEl.placeholder = 'http://127.0.0.1:4891/v1';
-        else apiBaseEl.placeholder = 'http://127.0.0.1:11434';
+        if (p === 'gpt4all') {
+          apiBaseEl.placeholder = 'http://127.0.0.1:4891/v1';
+          modelEl.placeholder = 'server default (optional)';
+          if (modelsBtn) modelsBtn.style.display = '';
+        } else {
+          apiBaseEl.placeholder = 'http://127.0.0.1:11434';
+          modelEl.placeholder = 'llama3';
+          if (modelsBtn) modelsBtn.style.display = 'none';
+          if (modelsMenu) modelsMenu.style.display = 'none';
+        }
       }
       updatePlaceholders();
 
@@ -360,6 +382,7 @@
         localStorage.setItem('timeout_sec', state.timeout_sec);
         localStorage.setItem('agent', state.agent);
         localStorage.setItem('system', state.system);
+        localStorage.setItem('stream', state.stream ? '1' : '0');
       }
 
       function el(tag, attrs={}, ...children) {
@@ -453,7 +476,8 @@
 
       async function send() {
         let prompt = inputEl.value.trim();
-        const model = modelEl.value.trim() || 'llama3';
+        const chosen = modelEl.value.trim();
+        const model = state.provider === 'gpt4all' ? chosen : (chosen || 'llama3');
         state.model = model;
         state.provider = providerEl.value;
         let base = apiBaseEl.value.trim();
@@ -464,6 +488,7 @@
         state.temperature = tempEl.value.trim();
         state.max_tokens = maxTokEl.value.trim();
         state.timeout_sec = (timeoutEl && timeoutEl.value.trim()) || '';
+        state.stream = streamEl ? !!streamEl.checked : false;
         saveState();
         if (!prompt) return;
         addMessage('user', prompt);
@@ -477,37 +502,81 @@
             temperature: state.temperature ? Number(state.temperature) : undefined,
             max_tokens: state.max_tokens ? Number(state.max_tokens) : undefined,
             timeout_sec: state.timeout_sec ? Number(state.timeout_sec) : undefined,
-            model,
             messages: [{ role: 'system', content: state.system }, ...state.messages],
-            stream: false
           };
-          const res = await fetch('/api/chat', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
+          if (model) payload.model = model;
+
           let content;
-          if (res.ok) {
-            const data = await res.json();
-            content = (data && data.content) || (data && data.data && data.data.message && data.data.message.content);
-            if (!content) content = 'No content in response.\n' + JSON.stringify(data, null, 2);
-            const fenced = extractCodeFence(content);
-            if (fenced) updateEditor(fenced.code, fenced.lang);
-          } else {
-            let textRaw = await res.text();
-            let parsed = null;
-            try { parsed = JSON.parse(textRaw); } catch {}
-            content = friendlyErrorMessage({
-              provider: state.provider,
-              status: res.status,
-              detail: (parsed && (parsed.detail || parsed.error)) || undefined,
-              body: (parsed && (parsed.body || parsed.message)) || (!parsed && textRaw) || undefined,
-              url: parsed && parsed.url,
-              base,
-              model
+          if (state.stream) {
+            // Streaming path
+            const res = await fetch('/api/chat/stream', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
             });
+            if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+            // Create assistant placeholder without re-rendering, so thinking stays visible
+            const asstIndex = state.messages.push({ role: 'assistant', content: '' }) - 1;
+            saveState();
+            const streamNode = el('div', { class: 'msg assistant', id: 'assistant-stream' },
+              el('div', { class: 'avatar' }, 'J'),
+              el('div', { class: 'bubble' }, '')
+            );
+            messagesEl.append(streamNode);
+            scrollToBottom();
+
+            const reader = res.body.getReader();
+            const dec = new TextDecoder();
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              const chunk = dec.decode(value);
+              state.messages[asstIndex].content += chunk;
+              saveState();
+              const bubbleEl = document.querySelector('#assistant-stream .bubble');
+              if (bubbleEl) bubbleEl.textContent = state.messages[asstIndex].content;
+              scrollToBottom();
+            }
+            removeThinking();
+            // Final sync render
+            render();
+            scrollToBottom();
+          } else {
+            // Non-streaming path
+            payload.stream = false;
+            const res = await fetch('/api/chat', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            if (res.ok) {
+              const data = await res.json();
+              content = (data && data.content) || (data && data.data && data.data.message && data.data.message.content);
+              if (data && data.used_model && state.provider === 'gpt4all') {
+                state.model = String(data.used_model);
+                modelEl.value = state.model;
+                saveState();
+              }
+              if (!content) content = 'No content in response.\n' + JSON.stringify(data, null, 2);
+              const fenced = extractCodeFence(content);
+              if (fenced) updateEditor(fenced.code, fenced.lang);
+              removeThinking();
+              addMessage('assistant', content);
+            } else {
+              let textRaw = await res.text();
+              let parsed = null;
+              try { parsed = JSON.parse(textRaw); } catch {}
+              content = friendlyErrorMessage({
+                provider: state.provider,
+                status: res.status,
+                detail: (parsed && (parsed.detail || parsed.error)) || undefined,
+                body: (parsed && (parsed.body || parsed.message)) || (!parsed && textRaw) || undefined,
+                url: parsed && parsed.url,
+                base,
+                model
+              });
+              removeThinking();
+              addMessage('assistant', content);
+            }
           }
-          removeThinking();
-          addMessage('assistant', content);
         } catch (e) {
           removeThinking();
           const msg = friendlyErrorMessage({
@@ -599,6 +668,46 @@
           greet();
           showAgent(false);
         });
+      }
+
+      async function loadModelsIntoMenu() {
+        const base = (state.api_base || apiBaseEl.value.trim());
+        if (!base) { modelsMenu.innerHTML = '<div class="menuitem">Set Host/Base URL first</div>'; return; }
+        modelsMenu.innerHTML = '<div class="menuitem">Loading…</div>';
+        try {
+          const tsec = (state.timeout_sec && Number(state.timeout_sec) > 0) ? Number(state.timeout_sec) : 30;
+          const q = new URLSearchParams({ api_base: base, timeout_sec: String(tsec) });
+          const res = await fetch('/api/gpt4all/models?' + q.toString());
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          const models = (data && data.models) || [];
+          if (!models.length) { modelsMenu.innerHTML = '<div class="menuitem">No models</div>'; return; }
+          modelsMenu.innerHTML = '';
+          for (const m of models) {
+            const btn = document.createElement('button');
+            btn.type = 'button'; btn.className = 'menuitem'; btn.textContent = m;
+            btn.addEventListener('click', () => {
+              modelEl.value = m; state.model = m; saveState(); modelsMenu.style.display = 'none';
+            });
+            modelsMenu.appendChild(btn);
+          }
+        } catch (e) {
+          modelsMenu.innerHTML = '<div class="menuitem">Error loading models</div>';
+        }
+      }
+
+      if (modelsBtn && modelsMenu) {
+        modelsBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (providerEl.value !== 'gpt4all') return;
+          if (modelsMenu.style.display !== 'block') {
+            await loadModelsIntoMenu();
+            modelsMenu.style.display = 'block';
+          } else {
+            modelsMenu.style.display = 'none';
+          }
+        });
+        document.addEventListener('click', () => { modelsMenu.style.display = 'none'; });
       }
 
       sendBtn.addEventListener('click', send);

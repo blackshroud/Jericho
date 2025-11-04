@@ -13,12 +13,19 @@ Jericho provides selectable “agent” personas, friendly error guidance, a the
   - GPT4All via `/v1/chat/completions` with fallbacks to `/chat/completions` and `/v1/completions`
 - Agents (personas)
   - Researcher, Analyst, Coder, Customer Service, Financial Planner (select from the “Agent” menu)
+- Streaming and performance
+  - Streaming toggle in Settings; `/api/chat/stream` for real-time tokens
+  - If the server rejects `stream` (e.g., some GPT4All builds), the backend auto-falls back to a normal request and pseudo-streams the final text
 - Modern chat UI
   - Theme menu (Dark/Light)
-  - Settings drawer: Host/Base URL, Temperature, Max tokens, Server timeout (0 = wait indefinitely)
+  - Settings drawer: Host/Base URL, Temperature, Max tokens, Server timeout (0 = wait indefinitely), Stream responses
+  - Models button (GPT4All): lists available models from the server and lets you pick one
   - Friendly error messages with tips (e.g., add `/v1` for GPT4All, pull models for Ollama)
   - Code editor pane (right side) with syntax highlighting (CodeMirror), Copy button, Close, animated, theme-aware; auto-opens when a code block (```lang) is detected
   - Chat history persists locally
+- Logging
+  - Colored terminal logs (INFO in green) with per-request ids, upstream timings, streaming chunk counts
+  - Set `LOG_LEVEL=DEBUG` for more detail
 
 ## Prerequisites
 - Python 3.10+
@@ -63,6 +70,16 @@ Open http://127.0.0.1:8000.
 - When Jericho returns code blocks, the code editor opens on the right; use Copy or Close
 
 ## API quick tests
+- Streaming (Ollama)
+```bash
+curl -N http://127.0.0.1:8000/api/chat/stream \
+  -H 'Content-Type: application/json' -d '{
+    "provider":"ollama",
+    "model":"llama3",
+    "messages":[{"role":"user","content":"stream this"}],
+    "timeout_sec": 120
+  }'
+```
 - Ollama
 ```bash
 curl -s http://127.0.0.1:8000/api/chat \
@@ -85,11 +102,16 @@ curl -s http://127.0.0.1:8000/api/chat \
     "timeout_sec": 0
   }'
 ```
+- List GPT4All models
+```bash
+curl -s "http://127.0.0.1:8000/api/gpt4all/models?api_base=http://203.30.13.127:4891/v1&timeout_sec=30" | jq
+```
 
 ## Troubleshooting
 - Address already in use: `run.sh` prompts to kill/change port or auto-selects a free port
 - HTTP 502: upstream not reachable/slow; verify provider host, model availability, and consider raising `timeout_sec` (or set to 0 for infinite wait)
 - HTTP 404 with GPT4All: ensure Base URL includes `/v1` when the server expects it
+- Streaming with GPT4All: if the server returns `'stream' is not supported`, the backend automatically falls back to a normal request and pseudo-streams the output (no UI error shown)
 - No content: some providers may return non-standard shapes; UI will show raw JSON if needed
 
 ## Notes
