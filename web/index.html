@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Jericho</title>
+    <meta name="theme-color" content="#0b0c0f" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='30' fill='%230a84ff'/><text x='32' y='39' font-size='28' text-anchor='middle' fill='white'>J</text></svg>">
+    <style>
+      :root {
+        --bg: #0b0c0f;
+        --panel: #111318;
+        --panel-2: #151821;
+        --text: #e6e6e6;
+        --muted: #a1a1aa;
+        --accent: #0a84ff;
+        --user-bubble: #1e293b;
+        --assistant-bubble: #0f172a;
+        --border: #22242c;
+      }
+      [data-theme='light'] {
+        --bg: #f7f7f8;
+        --panel: #ffffff;
+        --panel-2: #f4f4f5;
+        --text: #0a0a0a;
+        --muted: #4b5563;
+        --accent: #0a84ff;
+        --user-bubble: #e5e7eb;
+        --assistant-bubble: #eef2ff;
+        --border: #e5e7eb;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0; background: var(--bg, #0b0c0f); color: var(--text, #e6e6e6);
+        font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Noto Sans";
+        overflow: hidden; /* prevent page scrolling; only messages scroll */
+      }
+      .app { height: 100vh; display: grid; grid-template-rows: auto 1fr; }
+      .topbar {
+        display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem;
+        border-bottom: 1px solid var(--border); background: var(--panel);
+        position: sticky; top: 0; z-index: 10;
+      }
+      .brand { font-weight: 600; letter-spacing: .2px; }
+      .sep { flex: 1; }
+      .model {
+        display: inline-flex; gap: .5rem; align-items: center; padding: .4rem .6rem;
+        background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+      }
+      .model input { background: transparent; color: var(--text); border: none; outline: none; width: 12ch; }
+      .model button { background: var(--accent); color: white; border: none; border-radius: 8px; padding: .45rem .75rem; cursor: pointer; }
+      .container { height: 100%; display: grid; grid-template-rows: 1fr auto; min-height: 0; }
+      .contentGrid { height: 100%; display: grid; grid-template-columns: 1fr 0fr; gap: 1rem; min-height: 0; transition: grid-template-columns .35s cubic-bezier(.2,.8,.2,1), gap .35s ease; }
+      .contentGrid.with-editor { grid-template-columns: 1fr 1fr; }
+      .messages {
+        overflow-y: auto; padding: 1rem; max-width: 900px; margin: 0 auto; width: 100%;
+        display: flex; flex-direction: column; gap: .75rem;
+        min-height: 0; /* allow shrinking so composer stays visible */
+        /* Firefox scrollbar */
+        scrollbar-color: var(--muted) var(--panel-2);
+        scrollbar-width: thin;
+      }
+      /* WebKit scrollbar styling */
+      .messages::-webkit-scrollbar {
+        width: 10px;
+      }
+      .messages::-webkit-scrollbar-track {
+        background: var(--panel-2);
+        border-left: 1px solid var(--border);
+      }
+      .messages::-webkit-scrollbar-thumb {
+        background-color: var(--muted);
+        border: 2px solid var(--panel-2);
+        border-radius: 8px;
+      }
+      .messages::-webkit-scrollbar-thumb:hover {
+        background-color: var(--accent);
+      }
+      .msg { display: flex; gap: .75rem; }
+      .msg.assistant { justify-content: flex-start; }
+      .msg.user { justify-content: flex-end; }
+      .msg .avatar { width: 28px; height: 28px; border-radius: 50%; flex: 0 0 28px; display: grid; place-items: center; font-size: 13px; background: #0a84ff22; color: var(--accent); }
+      .msg.user .avatar { background: #22c55e22; color: #22c55e; }
+      .bubble {
+        max-width: 85%; padding: .65rem .8rem; border-radius: 12px; white-space: pre-wrap; word-wrap: break-word;
+        border: 1px solid var(--border);
+      }
+      .user .bubble { background: var(--user-bubble); }
+      .assistant .bubble { background: var(--assistant-bubble); }
+      .composer {
+        padding: .75rem; border-top: 1px solid var(--border); background: linear-gradient(180deg, transparent, var(--panel) 30%);
+        position: sticky; bottom: 0; z-index: 5; /* keep bottom section visible */
+      }
+      .composer-inner { max-width: 900px; margin: 0 auto; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: .5rem; display: flex; gap: .5rem; }
+      .editorWrap { width: 100%; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; display: none; grid-template-rows: auto 1fr; min-height: 0; opacity: 0; transform: translateX(16px) scale(.98); pointer-events: none; filter: drop-shadow(0 0 0 rgba(0,0,0,0)); }
+      .editorWrap.active { display: grid; opacity: 1; transform: translateX(0) scale(1); pointer-events: auto; animation: popIn .35s cubic-bezier(.2,.8,.2,1); filter: drop-shadow(0 10px 24px rgba(0,0,0,.35)); }
+      @keyframes popIn { from { opacity: 0; transform: translateX(24px) scale(.96); } to { opacity: 1; transform: translateX(0) scale(1);} }
+      .editorHeader { display: flex; align-items: center; justify-content: space-between; padding: .4rem .6rem; border-bottom: 1px solid var(--border); }
+      #copyCode, #closeEditor { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: .3rem .6rem; cursor: pointer; }
+      .CodeMirror { height: 100%; background: transparent; }
+      @media (prefers-reduced-motion: reduce) {
+        .contentGrid { transition: none; }
+        .editorWrap.active { animation: none; }
+      }
+      .composer textarea {
+        flex: 1; resize: none; background: transparent; color: var(--text); border: none; outline: none; min-height: 52px; max-height: 180px; padding: .5rem; 
+      }
+      .actions { display: flex; gap: .5rem; align-items: end; }
+.btn { background: var(--accent); color: white; border: none; border-radius: 10px; padding: .6rem .9rem; cursor: pointer; }
+      .btn:disabled { opacity: .6; cursor: not-allowed; }
+      .muted { color: var(--muted); font-size: 12px; }
+      .thinking { display: inline-flex; gap: .25rem; align-items: center; }
+      .dropdown { position: relative; }
+      .menu { position: absolute; right: 0; top: calc(100% + 6px); background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.3); min-width: 140px; }
+      .menu .menuitem { width: 100%; text-align: left; background: transparent; color: var(--text); border: none; padding: .5rem .75rem; cursor: pointer; }
+      .menu .menuitem:hover { background: var(--panel-2); }
+      .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); opacity: .6; animation: blink 1.2s infinite; }
+      .dot:nth-child(2) { animation-delay: .2s; }
+      .dot:nth-child(3) { animation-delay: .4s; }
+      @keyframes blink { 0%, 20% { opacity: .2 } 50% { opacity: 1 } 100% { opacity: .2 } }
+      .footer-hint { max-width: 900px; margin: .25rem auto 1rem; padding: 0 1rem; color: var(--muted); }
+      code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace; }
+    </style>
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/eclipse.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  </head>
+  <body data-theme="dark">
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">Jericho</div>
+        <div class="sep"></div>
+        <div class="model">
+          <span class="muted">Provider</span>
+          <select id="provider">
+            <option value="ollama">Ollama (local)</option>
+            <option value="gpt4all">GPT4All (OpenAI API compatible)</option>
+          </select>
+        </div>
+        <div class="model dropdown">
+          <button id="theme_btn" class="btn" type="button">Theme</button>
+          <div id="theme_menu" class="menu" style="display:none">
+            <button type="button" class="menuitem" data-theme="dark">Dark</button>
+            <button type="button" class="menuitem" data-theme="light">Light</button>
+          </div>
+        </div>
+        <div class="model dropdown">
+          <button id="agent_btn" class="btn" type="button">Agent</button>
+          <div id="agent_menu" class="menu" style="display:none">
+            <button type="button" class="menuitem" data-agent="researcher">Researcher</button>
+            <button type="button" class="menuitem" data-agent="analyst">Analyst</button>
+            <button type="button" class="menuitem" data-agent="coder">Coder</button>
+            <button type="button" class="menuitem" data-agent="customer_service">Customer Service</button>
+            <button type="button" class="menuitem" data-agent="financial_planner">Financial Planner</button>
+          </div>
+        </div>
+        <div class="model">
+          <span class="muted">Model</span>
+          <input id="model" type="text" placeholder="llama3" value="llama3"/>
+          <button id="clear">New chat</button>
+        </div>
+      </header>
+
+      <main class="container">
+        <div class="contentGrid">
+          <div id="messages" class="messages"></div>
+          <div class="editorWrap">
+            <div class="editorHeader">
+              <span>Code Editor</span>
+              <div style="display:flex; gap:.5rem; align-items:center;">
+                <button id="copyCode" type="button">Copy</button>
+                <button id="closeEditor" type="button">Close</button>
+              </div>
+            </div>
+            <textarea id="code-editor"></textarea>
+          </div>
+        </div>
+        <div class="composer">
+          <div style="max-width:900px;margin:0 auto 8px;">
+            <details id="settings"><summary class="muted" style="cursor:pointer">Settings</summary>
+              <div style="display:grid;gap:.5rem;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));padding:.5rem 0;">
+                <label class="muted">Host/Base URL
+                  <input id="api_base" type="text" placeholder="http://127.0.0.1:11434" style="width:100%;padding:.4rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;color:var(--text)" />
+                </label>
+                <label class="muted">Temperature
+                  <input id="temperature" type="number" step="0.1" min="0" max="2" placeholder="optional" style="width:100%;padding:.4rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;color:var(--text)" />
+                </label>
+                <label class="muted">Max tokens
+                  <input id="max_tokens" type="number" min="1" placeholder="optional" style="width:100%;padding:.4rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;color:var(--text)" />
+                </label>
+                <label class="muted">Server timeout (sec)
+                  <input id="timeout_sec" type="number" min="5" placeholder="optional" style="width:100%;padding:.4rem;background:var(--panel-2);border:1px solid var(--border);border-radius:8px;color:var(--text)" />
+                </label>
+              </div>
+            </details>
+          </div>
+          <div class="composer-inner">
+            <textarea id="input" placeholder="Send a message. Shift+Enter for newline"></textarea>
+            <div class="actions">
+              <button class="btn" id="send">Send</button>
+            </div>
+          </div>
+          <div class="footer-hint muted">Enter to send • Shift+Enter for newline</div>
+        </div>
+      </main>
+    </div>
+
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/shell/shell.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/json/json.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+
+    <script>
+      const $ = (s) => document.querySelector(s);
+      const messagesEl = $('#messages');
+      const inputEl = $('#input');
+      const sendBtn = $('#send');
+      const modelEl = $('#model');
+      const clearBtn = $('#clear');
+      const themeBtn = $('#theme_btn');
+      const themeMenu = $('#theme_menu');
+      const agentBtn = $('#agent_btn');
+      const agentMenu = $('#agent_menu');
+      const providerEl = $('#provider');
+      const apiBaseEl = $('#api_base');
+      const tempEl = $('#temperature');
+      const maxTokEl = $('#max_tokens');
+      const timeoutEl = $('#timeout_sec');
+      const copyBtn = $('#copyCode');
+      const closeBtn = $('#closeEditor');
+      const gridEl = document.querySelector('.contentGrid');
+      const editorWrapEl = document.querySelector('.editorWrap');
+
+      let cm = null;
+      function editorTheme() { return (document.body.getAttribute('data-theme') === 'light') ? 'eclipse' : 'material'; }
+      function setEditorModeByLang(lang) {
+        if (!cm) return;
+        const map = {
+          js: 'javascript', javascript: 'javascript', ts: 'javascript', typescript: 'javascript',
+          py: 'python', python: 'python',
+          sh: 'shell', bash: 'shell', shell: 'shell',
+          md: 'markdown', markdown: 'markdown',
+          html: 'htmlmixed', xml: 'xml',
+          json: 'application/json', yaml: 'yaml', yml: 'yaml', css: 'css',
+          java: 'text/x-java', c: 'text/x-csrc', cpp: 'text/x-c++src'
+        };
+        const mode = map[lang?.toLowerCase?.()] || 'javascript';
+        cm.setOption('mode', mode);
+      }
+      function initEditor() {
+        if (!editorWrapEl) return;
+        if (window.CodeMirror && !cm) {
+          cm = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+            lineNumbers: true,
+            lineWrapping: true,
+            theme: editorTheme(),
+            mode: 'javascript',
+            viewportMargin: Infinity
+          });
+        }
+      }
+      function showEditor(on) {
+        if (!gridEl || !editorWrapEl) return;
+        editorWrapEl.classList.toggle('active', !!on);
+        gridEl.classList.toggle('with-editor', !!on);
+      }
+      function updateEditor(code, lang) {
+        initEditor();
+        if (!cm) return;
+        showEditor(true);
+        setEditorModeByLang(lang);
+        cm.setValue(code || '');
+        cm.setOption('theme', editorTheme());
+        // refresh after a tick so layout is settled
+        setTimeout(() => cm.refresh(), 0);
+      }
+      function extractCodeFence(text) {
+        if (!text) return null;
+        const m = text.match(/```(\w+)?\n([\s\S]*?)```/);
+        if (!m) return null;
+        return { lang: (m[1]||'').trim(), code: m[2] };
+      }
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          showEditor(false);
+        });
+      }
+      if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+          try {
+            const val = cm ? cm.getValue() : '';
+            await navigator.clipboard.writeText(val);
+            copyBtn.textContent = 'Copied';
+            setTimeout(() => copyBtn.textContent = 'Copy', 1200);
+          } catch {}
+        });
+      }
+
+      const AGENTS = {
+        researcher: "You are Jericho (Researcher). Thorough, methodical, and evidence-driven. Formulate hypotheses, outline methodology, cite credible sources with URLs when possible, note assumptions and limitations, and propose next steps for further inquiry.",
+        analyst: "You are Jericho (Analyst). Concise and structured. Break problems into components, compare alternatives, quantify trade-offs, present pros/cons and risks, and summarize with clear recommendations. Prefer bullet points and simple tables in Markdown when useful.",
+        coder: "You are Jericho (Coder). Write correct, production-quality code with sensible defaults. Consider edge cases and performance. When presenting code, use fenced blocks with a language tag. Briefly explain decisions only if asked.",
+        customer_service: "You are Jericho (Customer Service). Empathetic, clear, and action-oriented. Acknowledge the user's concern, provide step-by-step guidance, confirm understanding, and avoid jargon. Keep responses focused and friendly.",
+        financial_planner: "You are Jericho (Financial Planner). Educational and cautious. Provide general information, not financial advice. Discuss budgeting, diversification, risk tolerance, and long-term planning. Include disclaimers and encourage consulting a licensed professional."
+      };
+
+      const state = {
+        agent: localStorage.getItem('agent') || 'coder',
+        system: localStorage.getItem('system') || '',
+        provider: localStorage.getItem('provider') || 'ollama',
+        api_base: localStorage.getItem('api_base') || '',
+        temperature: localStorage.getItem('temperature') || '',
+        max_tokens: localStorage.getItem('max_tokens') || '',
+        timeout_sec: localStorage.getItem('timeout_sec') || '',
+        model: localStorage.getItem('model') || 'llama3',
+        messages: JSON.parse(localStorage.getItem('messages') || '[]')
+      };
+      function setAgent(key) {
+        state.agent = key in AGENTS ? key : 'coder';
+        state.system = AGENTS[state.agent];
+        localStorage.setItem('agent', state.agent);
+        localStorage.setItem('system', state.system);
+      }
+      setAgent(state.agent);
+      modelEl.value = state.model;
+      providerEl.value = state.provider;
+      apiBaseEl.value = state.api_base;
+      tempEl.value = state.temperature;
+      maxTokEl.value = state.max_tokens;
+      if (timeoutEl) timeoutEl.value = state.timeout_sec;
+
+      function updatePlaceholders() {
+        const p = providerEl.value;
+        if (p === 'gpt4all') apiBaseEl.placeholder = 'http://127.0.0.1:4891/v1';
+        else apiBaseEl.placeholder = 'http://127.0.0.1:11434';
+      }
+      updatePlaceholders();
+
+      // Theme setup
+      const theme = localStorage.getItem('theme') || 'dark';
+      document.body.setAttribute('data-theme', theme);
+
+      function saveState() {
+        localStorage.setItem('model', state.model);
+        localStorage.setItem('messages', JSON.stringify(state.messages));
+        localStorage.setItem('provider', state.provider);
+        localStorage.setItem('api_base', state.api_base);
+        localStorage.setItem('temperature', state.temperature);
+        localStorage.setItem('max_tokens', state.max_tokens);
+        localStorage.setItem('timeout_sec', state.timeout_sec);
+        localStorage.setItem('agent', state.agent);
+        localStorage.setItem('system', state.system);
+      }
+
+      function el(tag, attrs={}, ...children) {
+        const n = document.createElement(tag);
+        Object.entries(attrs).forEach(([k,v]) => {
+          if (k === 'class') n.className = v; else if (k === 'html') n.innerHTML = v; else n.setAttribute(k, v);
+        });
+        for (const c of children) n.append(c);
+        return n;
+      }
+
+      function scrollToBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+      function render() {
+        messagesEl.innerHTML = '';
+        for (const m of state.messages) {
+          const role = m.role;
+          const bubble = el('div', { class: `bubble` }, m.content);
+          const avatar = el('div', { class: 'avatar' }, role === 'user' ? 'U' : 'J');
+          const msg = el('div', { class: `msg ${role}` }, avatar, bubble);
+          messagesEl.append(msg);
+        }
+        scrollToBottom();
+      }
+
+      function addMessage(role, content) {
+        state.messages.push({ role, content });
+        saveState();
+        render();
+      }
+
+      function setBusy(b) {
+        sendBtn.disabled = b;
+        inputEl.disabled = b;
+      }
+
+      function addThinking() {
+        const bubble = el('div', { class: 'bubble' });
+        const dots = el('span', { class: 'thinking' }, el('span', { class: 'dot'}), el('span', { class: 'dot'}), el('span', { class: 'dot'}));
+        bubble.append('Thinking ', dots);
+        const avatar = el('div', { class: 'avatar' }, 'J');
+        const msg = el('div', { class: 'msg assistant', id: 'thinking' }, avatar, bubble);
+        messagesEl.append(msg);
+        scrollToBottom();
+      }
+
+      function removeThinking() {
+        const t = document.getElementById('thinking');
+        if (t) t.remove();
+      }
+
+      function truncate(s, n=600) {
+        if (!s) return '';
+        s = String(s);
+        return s.length > n ? s.slice(0, n) + '…' : s;
+      }
+
+      function friendlyErrorMessage({provider, status, detail, body, url, base, model}) {
+        const lines = [];
+        const host = base || (provider === 'ollama' ? 'http://127.0.0.1:11434' : (provider === 'gpt4all' ? 'http://127.0.0.1:4891/v1' : ''));
+        const title = `I ran into an issue talking to ${provider.toUpperCase()} (HTTP ${status}).`;
+        lines.push(title);
+        if (detail) lines.push('', `Details: ${detail}`);
+        if (url) lines.push(`Endpoint: ${url}`);
+        // Provider-specific guidance
+        if (provider === 'ollama') {
+          lines.push('', 'Try:',
+            `- Ensure Ollama is running: ollama list (should respond)`,
+            `- Verify host in Settings → Host/Base URL (e.g., ${host})`,
+            `- Make sure the model exists: ollama pull "${model || 'llama3'}"`
+          );
+        } else if (provider === 'gpt4all') {
+          lines.push('', 'Try:',
+            `- Verify the server is reachable: curl ${host}/chat/completions`,
+            `- Ensure Base URL includes /v1 (e.g., http://HOST:4891/v1)`,
+            `- Check the model name is valid on the GPT4All server`
+          );
+        }
+        if (status === 404) {
+          lines.push('', 'Tip: 404 suggests a wrong path. For GPT4All, prefer /v1/chat/completions; for Ollama, /api/chat.');
+        }
+        if (status === 502) {
+          lines.push('', 'Tip: 502 often means the upstream is unreachable or slow. If the model is large, increase timeout and try again.');
+        }
+        if (body) {
+          const brief = truncate(body, 600);
+          if (brief.trim()) lines.push('', 'Server said:', brief);
+        }
+        return lines.join('\n');
+      }
+
+      async function send() {
+        let prompt = inputEl.value.trim();
+        const model = modelEl.value.trim() || 'llama3';
+        state.model = model;
+        state.provider = providerEl.value;
+        let base = apiBaseEl.value.trim();
+        if (state.provider === 'gpt4all' && base && !/\/v\d+(\/|$)/.test(base)) {
+          base = base.replace(/\/+$/, '') + '/v1';
+        }
+        state.api_base = base;
+        state.temperature = tempEl.value.trim();
+        state.max_tokens = maxTokEl.value.trim();
+        state.timeout_sec = (timeoutEl && timeoutEl.value.trim()) || '';
+        saveState();
+        if (!prompt) return;
+        addMessage('user', prompt);
+        inputEl.value = '';
+        setBusy(true);
+        addThinking();
+        try {
+          const payload = {
+            provider: state.provider,
+            api_base: state.api_base || undefined,
+            temperature: state.temperature ? Number(state.temperature) : undefined,
+            max_tokens: state.max_tokens ? Number(state.max_tokens) : undefined,
+            timeout_sec: state.timeout_sec ? Number(state.timeout_sec) : undefined,
+            model,
+            messages: [{ role: 'system', content: state.system }, ...state.messages],
+            stream: false
+          };
+          const res = await fetch('/api/chat', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          let content;
+          if (res.ok) {
+            const data = await res.json();
+            content = (data && data.content) || (data && data.data && data.data.message && data.data.message.content);
+            if (!content) content = 'No content in response.\n' + JSON.stringify(data, null, 2);
+            const fenced = extractCodeFence(content);
+            if (fenced) updateEditor(fenced.code, fenced.lang);
+          } else {
+            let textRaw = await res.text();
+            let parsed = null;
+            try { parsed = JSON.parse(textRaw); } catch {}
+            content = friendlyErrorMessage({
+              provider: state.provider,
+              status: res.status,
+              detail: (parsed && (parsed.detail || parsed.error)) || undefined,
+              body: (parsed && (parsed.body || parsed.message)) || (!parsed && textRaw) || undefined,
+              url: parsed && parsed.url,
+              base,
+              model
+            });
+          }
+          removeThinking();
+          addMessage('assistant', content);
+        } catch (e) {
+          removeThinking();
+          const msg = friendlyErrorMessage({
+            provider: state.provider,
+            status: 'network',
+            detail: String(e),
+            body: undefined,
+            url: undefined,
+            base: state.api_base,
+            model
+          });
+          addMessage('assistant', msg);
+        } finally {
+          setBusy(false);
+        }
+      }
+
+      // Auto-resize textarea
+      function fit() {
+        inputEl.style.height = '0px';
+        inputEl.style.height = Math.min(180, inputEl.scrollHeight) + 'px';
+      }
+      inputEl.addEventListener('input', fit);
+      setTimeout(fit, 0);
+
+      // Enter to send
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          send();
+        }
+      });
+
+      providerEl.addEventListener('change', () => {
+        state.provider = providerEl.value;
+        updatePlaceholders();
+        saveState();
+      });
+
+      if (themeBtn && themeMenu) {
+        const showMenu = (show) => { themeMenu.style.display = show ? 'block' : 'none'; };
+        themeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isOpen = themeMenu.style.display === 'block';
+          showMenu(!isOpen);
+        });
+        document.addEventListener('click', () => showMenu(false));
+        themeMenu.addEventListener('click', (e) => {
+          const t = e.target.closest('[data-theme]');
+          if (!t) return;
+          const next = t.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+          document.body.setAttribute('data-theme', next);
+          localStorage.setItem('theme', next);
+          if (cm) cm.setOption('theme', editorTheme());
+          showMenu(false);
+        });
+      }
+
+      function greet() {
+        const titles = {
+          researcher: 'Researcher',
+          analyst: 'Analyst',
+          coder: 'Coder',
+          customer_service: 'Customer Service',
+          financial_planner: 'Financial Planner'
+        };
+        const title = titles[state.agent] || 'Assistant';
+        addMessage('assistant', `Hi, I\'m Jericho — ${title}. How can I help today?`);
+      }
+
+      if (state.messages.length === 0) {
+        greet();
+      }
+
+      if (agentBtn && agentMenu) {
+        const showAgent = (show) => { agentMenu.style.display = show ? 'block' : 'none'; };
+        agentBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const isOpen = agentMenu.style.display === 'block';
+          showAgent(!isOpen);
+        });
+        document.addEventListener('click', () => showAgent(false));
+        agentMenu.addEventListener('click', (e) => {
+          const t = e.target.closest('[data-agent]');
+          if (!t) return;
+          const key = t.getAttribute('data-agent');
+          setAgent(key);
+          saveState();
+          greet();
+          showAgent(false);
+        });
+      }
+
+      sendBtn.addEventListener('click', send);
+      clearBtn.addEventListener('click', () => {
+        state.messages = [];
+        saveState();
+        render();
+        showEditor(false);
+        inputEl.focus();
+      });
+
+      // Initial render
+      render();
+    </script>
+  </body>
+</html>
