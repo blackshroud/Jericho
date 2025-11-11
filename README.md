@@ -64,7 +64,7 @@ Open http://127.0.0.1:8000.
 - Choose Provider (Ollama or GPT4All) and set Host/Base URL in Settings
   - Examples:
     - Ollama: `http://127.0.0.1:11434`
-    - GPT4All: `http://203.30.13.127:4891/v1` (note the `/v1`)
+    - GPT4All: `http://(IP):4891/v1` (note the `/v1`)
 - Adjust Temperature, Max tokens, and Server timeout (sec)
   - Timeout `0` means “wait indefinitely” until the server responds or fails
 - When Jericho returns code blocks, the code editor opens on the right; use Copy or Close
@@ -95,7 +95,7 @@ curl -s http://127.0.0.1:8000/api/chat \
 curl -s http://127.0.0.1:8000/api/chat \
   -H 'Content-Type: application/json' -d '{
     "provider":"gpt4all",
-    "api_base":"http://203.30.13.127:4891/v1",
+    "api_base":"http://(IP):4891/v1",
     "model":"Phi-3 Mini Instruct",
     "messages":[{"role":"user","content":"Who is Lionel Messi?"}],
     "max_tokens": 200,
@@ -104,7 +104,7 @@ curl -s http://127.0.0.1:8000/api/chat \
 ```
 - List GPT4All models
 ```bash
-curl -s "http://127.0.0.1:8000/api/gpt4all/models?api_base=http://203.30.13.127:4891/v1&timeout_sec=30" | jq
+curl -s "http://127.0.0.1:8000/api/gpt4all/models?api_base=http://(IP):4891/v1&timeout_sec=30" | jq
 ```
 
 ## Troubleshooting
